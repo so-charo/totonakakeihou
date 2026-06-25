@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>豊中市 警報モニター</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --safe: #16a34a;
+      --warn: #dc2626;
+      --caution: #f59e0b;
+      --border: #374151;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #1e293b, var(--bg));
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    main {
+      width: min(920px, 100%);
+      background: rgba(17, 24, 39, .92);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.35);
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 4vw, 42px); }
+    .sub { color: var(--muted); margin-bottom: 20px; line-height: 1.7; }
+    .status {
+      border-radius: 24px;
+      padding: clamp(28px, 6vw, 56px);
+      text-align: center;
+      margin: 20px 0;
+      background: var(--panel2);
+      border: 2px solid var(--border);
+      transition: .25s ease;
+    }
+    .status.safe { border-color: rgba(22,163,74,.7); box-shadow: 0 0 0 6px rgba(22,163,74,.12); }
+    .status.warn { border-color: rgba(220,38,38,.85); box-shadow: 0 0 0 8px rgba(220,38,38,.14); animation: pulse 1.2s infinite; }
+    .status.error { border-color: rgba(245,158,11,.85); box-shadow: 0 0 0 6px rgba(245,158,11,.12); }
+    @keyframes pulse { 0%,100%{ transform: scale(1); } 50%{ transform: scale(1.01); } }
+    #mainText { font-size: clamp(52px, 12vw, 132px); font-weight: 900; letter-spacing: .08em; line-height: 1; }
+    .safe #mainText { color: #86efac; }
+    .warn #mainText { color: #fecaca; }
+    .error #mainText { color: #fde68a; font-size: clamp(34px, 7vw, 72px); letter-spacing: .02em; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .card { background: rgba(31, 41, 55, .75); border: 1px solid var(--border); border-radius: 16px; padding: 14px; }
+    .label { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .value { font-size: 16px; font-weight: 700; word-break: break-word; }
+    #details { margin-top: 16px; padding: 16px; background: rgba(15, 23, 42, .65); border: 1px solid var(--border); border-radius: 16px; line-height: 1.8; white-space: pre-wrap; }
+    .buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    button, a.button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: #334155;
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    button:hover, a.button:hover { filter: brightness(1.12); }
+    .small { color: var(--muted); font-size: 13px; line-height: 1.7; margin-top: 16px; }
+    code { background: rgba(255,255,255,.08); padding: 2px 5px; border-radius: 6px; }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } main { padding: 18px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>豊中市 警報モニター</h1>
+  <div class="sub">気象庁の警報・注意報JSONを1分ごとに確認し、豊中市にレベル3相当以上、または警報・危険警報・特別警報が出ていれば大きく「警報」と表示します。</div>
+
+  <section id="statusBox" class="status error" aria-live="polite">
+    <div id="mainText">確認中</div>
+  </section>
+
+  <div class="grid">
+    <div class="card"><div class="label">対象地域</div><div class="value">大阪府 豊中市</div></div>
+    <div class="card"><div class="label">最終確認</div><div id="lastChecked" class="value">-</div></div>
+    <div class="card"><div class="label">次回確認</div><div id="nextCheck" class="value">-</div></div>
+  </div>
+
+  <div id="details">初回確認中です。</div>
+
+  <div class="buttons">
+    <button id="checkNow">今すぐ確認</button>
+    <button id="toggleSound">警報時の音：OFF</button>
+    <a class="button" href="https://www.jma.go.jp/bosai/warning/" target="_blank" rel="noopener">気象庁で確認</a>
+  </div>
+
+  <div class="small">
+    取得先：<code>https://www.jma.go.jp/bosai/warning/data/r8/270000.json</code><br>
+    これは補助表示です。学校判断・通勤判断・児童の安全判断は、気象庁公式画面、自治体、教育委員会、学校の連絡系統で必ず確認してください。ブラウザ1枚に命を預けるのは、さすがに文明を信じすぎです。
+  </div>
+</main>
+
+<script>
+(() => {
+  const JMA_URL = "https://www.jma.go.jp/bosai/warning/data/r8/270000.json";
+  const TARGET_NAME = "豊中市";
+  const INTERVAL_MS = 60 * 1000;
+
+  const statusBox = document.getElementById("statusBox");
+  const mainText = document.getElementById("mainText");
+  const lastChecked = document.getElementById("lastChecked");
+  const nextCheck = document.getElementById("nextCheck");
+  const details = document.getElementById("details");
+  const checkNow = document.getElementById("checkNow");
+  const toggleSound = document.getElementById("toggleSound");
+
+  let timer = null;
+  let countdownTimer = null;
+  let nextAt = null;
+  let soundEnabled = false;
+
+  // R06/R8系の名称・コードをゆるめに拾う。気象庁JSONの構造変更に備えて、名称とlevel系フィールドの両方を見る。
+  const alertNamePattern = /(レベル[3-5]|警報|危険警報|特別警報|土砂災害警戒情報|氾濫危険情報|氾濫発生情報)/;
+  const ignorePattern = /(注意報|解除|発表なし|なし)/;
+
+  // 参考：警戒レベル等対応コード表に由来する可能性のある値も拾う。未知コードは名称で判定する。
+  const level3OrHigherCodes = new Set(["03", "04", "05", 3, 4, 5]);
+
+  function fmt(d) {
+    return d.toLocaleString("ja-JP", { hour12: false });
+  }
+
+  function setStatus(kind, text, detailText) {
+    statusBox.className = `status ${kind}`;
+    mainText.textContent = text;
+    details.textContent = detailText;
+    document.title = text === "警報" ? "【警報】豊中市 警報モニター" : "豊中市 警報モニター";
+    if (text === "警報" && soundEnabled) beep();
+  }
+
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.05;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      setTimeout(() => { osc.stop(); ctx.close(); }, 400);
+    } catch (_) {}
+  }
+
+  function findTargetArea(obj, hits = []) {
+    if (!obj || typeof obj !== "object") return hits;
+
+    const maybeName = obj.name || obj.areaName || obj.codeName || obj.area?.name;
+    if (maybeName === TARGET_NAME) hits.push(obj);
+
+    for (const value of Object.values(obj)) {
+      if (value && typeof value === "object") findTargetArea(value, hits);
+    }
+    return hits;
+  }
+
+  function collectKindTexts(areaObj) {
+    const found = [];
+
+    function walk(obj) {
+      if (!obj || typeof obj !== "object") return;
+
+      const name = obj.name || obj.kind?.name || obj.warning?.name || obj.condition || obj.status;
+      const code = obj.code ?? obj.kind?.code ?? obj.level ?? obj.warningLevel ?? obj.warning?.code;
+
+      if (name || code !== undefined) {
+        found.push({ name: String(name ?? ""), code });
+      }
+
+      for (const value of Object.values(obj)) {
+        if (value && typeof value === "object") walk(value);
+      }
+    }
+
+    walk(areaObj);
+    return found;
+  }
+
+  function isAlertKind(kind) {
+    const name = kind.name || "";
+    const code = kind.code;
+
+    if (level3OrHigherCodes.has(code) || level3OrHigherCodes.has(String(code).padStart(2, "0"))) return true;
+    if (alertNamePattern.test(name) && !ignorePattern.test(name)) return true;
+    return false;
+  }
+
+  function analyze(data) {
+    const targetAreas = findTargetArea(data);
+    if (!targetAreas.length) {
+      return { error: true, message: "豊中市のデータを見つけられませんでした。気象庁JSONの構造が変わった可能性があります。" };
+    }
+
+    const allKinds = targetAreas.flatMap(collectKindTexts);
+    const unique = [];
+    const seen = new Set();
+    for (const k of allKinds) {
+      const key = `${k.name}|${k.code}`;
+      if (!seen.has(key) && (k.name || k.code !== undefined)) {
+        seen.add(key);
+        unique.push(k);
+      }
+    }
+
+    const alerts = unique.filter(isAlertKind);
+    return {
+      alert: alerts.length > 0,
+      found: unique,
+      alerts
+    };
+  }
+
+  async function check() {
+    const now = new Date();
+    lastChecked.textContent = fmt(now);
+    nextAt = new Date(Date.now() + INTERVAL_MS);
+    updateNextCheck();
+
+    try {
+      const res = await fetch(`${JMA_URL}?_=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const result = analyze(data);
+
+      if (result.error) {
+        setStatus("error", "確認不可", result.message);
+        return;
+      }
+
+      const listText = result.found.length
+        ? result.found.map(k => `・${k.name || "名称不明"}${k.code !== undefined ? `（code: ${k.code}）` : ""}`).join("\n")
+        : "・発表情報なし、または名称を取得できませんでした。";
+
+      if (result.alert) {
+        const alertText = result.alerts.map(k => `・${k.name || "名称不明"}${k.code !== undefined ? `（code: ${k.code}）` : ""}`).join("\n");
+        setStatus("warn", "警報", `豊中市に警戒レベル3相当以上、または警報系の情報を検出しました。\n\n検出した警報系情報：\n${alertText}\n\n取得した豊中市関連情報：\n${listText}`);
+      } else {
+        setStatus("safe", "発表なし", `豊中市にレベル3相当以上・警報系の情報は見つかりませんでした。\n\n取得した豊中市関連情報：\n${listText}`);
+      }
+    } catch (e) {
+      setStatus("error", "取得失敗", `気象庁データを取得できませんでした。\n理由：${e.message}\n\nローカルHTMLを直接開いた場合、ブラウザ設定や通信環境でfetchが止まることがあります。その場合はGitHub Pages等に置いてください。`);
+    }
+  }
+
+  function updateNextCheck() {
+    if (!nextAt) return;
+    const remaining = Math.max(0, Math.ceil((nextAt - Date.now()) / 1000));
+    nextCheck.textContent = `${fmt(nextAt)}（あと${remaining}秒）`;
+  }
+
+  function start() {
+    clearInterval(timer);
+    clearInterval(countdownTimer);
+    check();
+    timer = setInterval(check, INTERVAL_MS);
+    countdownTimer = setInterval(updateNextCheck, 1000);
+  }
+
+  checkNow.addEventListener("click", check);
+  toggleSound.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    toggleSound.textContent = `警報時の音：${soundEnabled ? "ON" : "OFF"}`;
+    if (soundEnabled) beep();
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>
